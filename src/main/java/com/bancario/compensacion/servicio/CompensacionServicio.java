@@ -17,6 +17,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.client.RestTemplate;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -29,6 +32,10 @@ public class CompensacionServicio {
     // no longer handled here
     private final DetalleCompensacionRepositorio detalleRepo;
     private final CompensacionMapper mapper;
+    private final RestTemplate restTemplate;
+
+    @Value("${service.contabilidad.url:http://ms-contabilidad:8083}")
+    private String contabilidadUrl;
 
     private final org.springframework.scheduling.TaskScheduler taskScheduler;
     private java.util.concurrent.ScheduledFuture<?> scheduledTask;
@@ -62,6 +69,15 @@ public class CompensacionServicio {
             acumularTransaccion(cicloAbierto.getId(), req.getBicEmisor(), req.getMonto(), true);
             acumularTransaccion(cicloAbierto.getId(), req.getBicReceptor(), req.getMonto(), false);
         }
+    }
+
+    @Transactional
+    public void acumularEnCicloAbierto(String bic, BigDecimal monto, boolean esDebito) {
+        CicloCompensacion cicloAbierto = cicloRepo.findByEstado("ABIERTO")
+                .stream().findFirst()
+                .orElseThrow(() -> new RuntimeException("No hay ciclo abierto para compensar (Auto)"));
+
+        acumularTransaccion(cicloAbierto.getId(), bic, monto, esDebito);
     }
 
     @Transactional
@@ -137,6 +153,10 @@ public class CompensacionServicio {
         cicloActual.setEstado("CERRADO");
         cicloActual.setFechaCierre(LocalDateTime.now(java.time.ZoneOffset.UTC));
         cicloRepo.save(cicloActual);
+
+        // --- DISPARO CONTABLE: Enviar posiciones a MS-CONTABILIDAD ---
+        enviarLiquidacionAContabilidad(cicloId, posiciones);
+        // -------------------------------------------------------------
 
         iniciarSiguienteCiclo(cicloActual, posiciones, minutosProximoCiclo);
 
@@ -253,6 +273,41 @@ public class CompensacionServicio {
 
         log.info("Programando cierre automático del ciclo {} para: {}", cicloId, fechaEjecucion);
         this.scheduledTask = taskScheduler.schedule(tareaCierre, fechaEjecucion);
+    }
+
+    /**
+     * DISPARO CONTABLE: Envía las posiciones calculadas a MS-CONTABILIDAD
+     * para que libere los fondosBloqueados y aplique los saldos netos reales.
+     */
+    private void enviarLiquidacionAContabilidad(Integer cicloId, List<PosicionInstitucion> posiciones) {
+        log.info(">>> ENVIANDO LIQUIDACIÓN A CONTABILIDAD para ciclo {}", cicloId);
+
+        try {
+            // Construir DTO compatible con MS-CONTABILIDAD
+            java.util.List<java.util.Map<String, Object>> posicionesDTO = new java.util.ArrayList<>();
+            for (PosicionInstitucion p : posiciones) {
+                java.util.Map<String, Object> pos = new java.util.HashMap<>();
+                pos.put("bic", p.getCodigoBic());
+                pos.put("totalDebitos", p.getTotalDebitos());
+                pos.put("totalCreditos", p.getTotalCreditos());
+                pos.put("posicionNeta", p.getNeto());
+                posicionesDTO.add(pos);
+            }
+
+            java.util.Map<String, Object> solicitud = new java.util.HashMap<>();
+            solicitud.put("cicloId", cicloId);
+            solicitud.put("posiciones", posicionesDTO);
+
+            String url = contabilidadUrl + "/api/v1/ledger/compensar";
+            restTemplate.postForEntity(url, solicitud, Void.class);
+
+            log.info(">>> LIQUIDACIÓN ENVIADA EXITOSAMENTE. Saldos actualizados en Contabilidad.");
+
+        } catch (Exception e) {
+            log.error("ALERTA CRÍTICA: Fallo al enviar liquidación a Contabilidad: {}", e.getMessage());
+            // En producción, esto debería disparar una alerta y mecanismo de reintento
+            throw new RuntimeException("Error en Disparo Contable: " + e.getMessage());
+        }
     }
 
     public byte[] generarReportePDF(Integer cicloId) {

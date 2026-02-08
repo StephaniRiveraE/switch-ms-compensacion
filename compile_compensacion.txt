@@ -1,0 +1,23 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ---------------------< com.bancario:compensacion >----------------------
+[INFO] Building compensacion 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- clean:3.4.1:clean (default-clean) @ compensacion ---
+[INFO] Deleting D:\universidad\Semestres\8vo semestre\arquitectura\Switch-V3\SwitchCambios\MSCompensacionSwitch\target
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ compensacion ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ compensacion ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 24 source files with javac [debug parameters release 21] to target\classes
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  7.156 s
+[INFO] Finished at: 2026-02-08T11:32:52-05:00
+[INFO] ------------------------------------------------------------------------
