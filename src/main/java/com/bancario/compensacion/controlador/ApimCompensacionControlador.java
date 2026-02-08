@@ -1,21 +1,22 @@
 package com.bancario.compensacion.controlador;
 
-import com.bancario.compensacion.servicio.ArchivosCompensacionServicio;
+import com.bancario.compensacion.servicio.CompensacionServicio;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 
 /**
  * Controlador compatible con AWS APIM para servicio de Compensación.
  * Expone endpoints en /api/v2/compensation/* configurados en el APIM.
+ * 
+ * NOTA: El endpoint de upload de archivos aún no está implementado en el
+ * backend.
+ * Este controlador solo proporciona el health check por ahora.
  */
 @Slf4j
 @RestController
@@ -24,39 +25,25 @@ import java.util.Map;
 @Tag(name = "APIM Compensación", description = "Endpoints de compensación expuestos via AWS API Gateway")
 public class ApimCompensacionControlador {
 
-    private final ArchivosCompensacionServicio archivosServicio;
+    private final CompensacionServicio compensacionServicio;
 
     /**
      * POST /api/v2/compensation/upload
      * Ruta configurada en APIM para subir archivos de compensación.
-     * Timeout extendido a 29s en APIM para archivos grandes.
+     * 
+     * TODO: Implementar lógica de procesamiento de archivos CSV/Excel.
+     * Por ahora retorna un mensaje indicando que la funcionalidad está en
+     * desarrollo.
      */
-    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Subir Archivo de Compensación", description = "Recibe archivos CSV/Excel con datos de compensación para procesamiento batch")
-    public ResponseEntity<Map<String, Object>> uploadArchivo(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "date", required = false) String compensationDate) {
+    @PostMapping("/upload")
+    @Operation(summary = "Subir Archivo de Compensación", description = "Recibe archivos CSV/Excel con datos de compensación para procesamiento batch (EN DESARROLLO)")
+    public ResponseEntity<Map<String, String>> uploadArchivo() {
+        log.warn("[APIM] Endpoint /upload llamado pero aún no implementado");
 
-        log.info("[APIM] Recibido archivo de compensación - Nombre: {}, Tamaño: {} bytes",
-                file.getOriginalFilename(), file.getSize());
-
-        try {
-            // Delegar al servicio existente
-            Object resultado = archivosServicio.procesarArchivo(file, compensationDate);
-
-            return ResponseEntity.ok(Map.of(
-                    "status", "COMPLETED",
-                    "message", "Archivo procesado exitosamente",
-                    "fileName", file.getOriginalFilename(),
-                    "result", resultado));
-
-        } catch (Exception e) {
-            log.error("[APIM] Error procesando archivo de compensación", e);
-            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(Map.of(
-                    "status", "FAILED",
-                    "error", "MS03",
-                    "message", "Error técnico procesando archivo: " + e.getMessage()));
-        }
+        return ResponseEntity.ok(Map.of(
+                "status", "NOT_IMPLEMENTED",
+                "message",
+                "La funcionalidad de upload de archivos está en desarrollo. Use /api/v1/compensacion/operaciones para registrar operaciones individuales."));
     }
 
     /**
