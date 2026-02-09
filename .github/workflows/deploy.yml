@@ -1,3 +1,7 @@
+# ============================================================================
+# WORKFLOW AUTOMATICO DE DEPLOY A EKS - MS-COMPENSACION
+# Este workflow CREA el deployment si no existe, o lo ACTUALIZA si ya existe
+# ============================================================================
 name: "Deploy to EKS (Auto)"
 
 on:
@@ -13,6 +17,12 @@ env:
   ECR_REPO: switch-ms-compensacion
   SERVICE_NAME: switch-ms-compensacion
   CONTAINER_PORT: "8084"
+  
+  # Configuración de Secretos (PostgreSQL)
+  SECRET_NAME: "switch-db-credentials"
+  SECRET_KEY_URL: "compensacion-url"
+  SECRET_KEY_USER: "compensacion-username"
+  SECRET_KEY_PASS: "compensacion-password"
 
 jobs:
   build-and-deploy:
@@ -62,6 +72,7 @@ jobs:
               -n ${{ env.NAMESPACE }}
           else
             echo "📦 Deployment no existe, creando..."
+            # Generar YAML dinamicamente
             cat <<EOF | kubectl apply -f -
           apiVersion: apps/v1
           kind: Deployment
@@ -70,9 +81,11 @@ jobs:
             namespace: ${{ env.NAMESPACE }}
             labels:
               app: ${{ env.SERVICE_NAME }}
-              component: compensacion
+              bank: ${{ env.NAMESPACE }}
           spec:
             replicas: 1
+            strategy:
+              type: Recreate
             selector:
               matchLabels:
                 app: ${{ env.SERVICE_NAME }}
@@ -80,6 +93,7 @@ jobs:
               metadata:
                 labels:
                   app: ${{ env.SERVICE_NAME }}
+                  bank: ${{ env.NAMESPACE }}
               spec:
                 containers:
                   - name: ${{ env.SERVICE_NAME }}
@@ -98,21 +112,23 @@ jobs:
                         value: "${{ env.CONTAINER_PORT }}"
                       - name: SPRING_PROFILES_ACTIVE
                         value: "prod"
+                      # Inyeccion dinamica de secretos DB
                       - name: SPRING_DATASOURCE_URL
                         valueFrom:
                           secretKeyRef:
-                            name: switch-db-credentials
-                            key: compensacion-url
+                            name: ${{ env.SECRET_NAME }}
+                            key: ${{ env.SECRET_KEY_URL }}
                       - name: SPRING_DATASOURCE_USERNAME
                         valueFrom:
                           secretKeyRef:
-                            name: switch-db-credentials
-                            key: compensacion-username
+                            name: ${{ env.SECRET_NAME }}
+                            key: ${{ env.SECRET_KEY_USER }}
                       - name: SPRING_DATASOURCE_PASSWORD
                         valueFrom:
                           secretKeyRef:
-                            name: switch-db-credentials
-                            key: compensacion-password
+                            name: ${{ env.SECRET_NAME }}
+                            key: ${{ env.SECRET_KEY_PASS }}
+                      # RabbitMQ & APIM
                       - name: RABBITMQ_USERNAME
                         valueFrom:
                           secretKeyRef:
@@ -124,14 +140,21 @@ jobs:
                             name: switch-secrets
                             key: rabbitmq-password
                       - name: APIM_SECURITY_ENABLED
-                        value: "false"
+                        value: "true"
+                      - name: APIM_ORIGIN_SECRET
+                        valueFrom:
+                          secretKeyRef:
+                            name: switch-secrets
+                            key: apim-origin-secret
+                      - name: TZ
+                        value: "America/Guayaquil"
                     livenessProbe:
                       httpGet:
                         path: /actuator/health/liveness
                         port: ${{ env.CONTAINER_PORT }}
-                      initialDelaySeconds: 90
+                      initialDelaySeconds: 120
                       periodSeconds: 10
-                      failureThreshold: 3
+                      failureThreshold: 5
                     readinessProbe:
                       httpGet:
                         path: /actuator/health/readiness
@@ -157,8 +180,9 @@ jobs:
       
       - name: Esperar Rollout
         run: |
-          echo "⏳ Esperando deployment..."
+          echo "⏳ Esperando que el deployment esté listo..."
           kubectl rollout status deployment/${{ env.SERVICE_NAME }} \
             -n ${{ env.NAMESPACE }} --timeout=300s
+          
           echo "✅ Deploy completado!"
           kubectl get pods -n ${{ env.NAMESPACE }} -l app=${{ env.SERVICE_NAME }}
