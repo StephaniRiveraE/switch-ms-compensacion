@@ -1,5 +1,5 @@
 # ============================================================================
-# WORKFLOW AUTOMATICO DE DEPLOY A EKS (Compensacion)
+# WORKFLOW DEPLOY EKS - CON AUTO-DIAGNOSTICO DE ERRORES
 # ============================================================================
 name: "Deploy to EKS (Compensacion)"
 
@@ -11,14 +11,13 @@ env:
   AWS_REGION: us-east-2
   EKS_CLUSTER: eks-banca-ecosistema
   
+  # Configuración del Servicio
   NAMESPACE: switch
   ECR_REPO: switch-ms-compensacion
   SERVICE_NAME: switch-ms-compensacion
-  
-  # Configuración del contenedor (Puerto 8084)
   CONTAINER_PORT: "8084"
   
-  # Configuración de Secretos
+  # Secretos
   SECRET_NAME: "switch-db-credentials"
   SECRET_KEY_URL: "compensacion-url"
   SECRET_KEY_USER: "compensacion-username"
@@ -65,7 +64,6 @@ jobs:
       
       - name: Verificar o Crear Deployment
         run: |
-          # Verificar si el deployment existe
           if kubectl get deployment ${{ env.SERVICE_NAME }} -n ${{ env.NAMESPACE }} > /dev/null 2>&1; then
             echo "✅ Deployment existe, actualizando imagen..."
             kubectl set image deployment/${{ env.SERVICE_NAME }} \
@@ -73,7 +71,6 @@ jobs:
               -n ${{ env.NAMESPACE }}
           else
             echo "📦 Deployment no existe, creando..."
-            # Generar YAML dinamicamente
             cat <<EOF | kubectl apply -f -
           apiVersion: apps/v1
           kind: Deployment
@@ -111,7 +108,6 @@ jobs:
                     env:
                       - name: SPRING_PROFILES_ACTIVE
                         value: "prod"
-                      # Inyeccion dinamica de secretos
                       - name: SPRING_DATASOURCE_URL
                         valueFrom:
                           secretKeyRef:
@@ -165,3 +161,24 @@ jobs:
           
           echo "✅ Deploy completado!"
           kubectl get pods -n ${{ env.NAMESPACE }} -l app=${{ env.SERVICE_NAME }}
+
+      # ======================================================================
+      # DIAGNOSTICO DE FALLOS
+      # Se ejecuta SOLO si el paso anterior falla
+      # ======================================================================
+      - name: 🔍 Diagnóstico de Fallo
+        if: failure()
+        run: |
+          echo "❌ EL DESPLIEGUE FALLÓ - REPORTE DE ERRORES:"
+          echo "=========================================="
+          
+          echo "1. ESTADO DE LOS PODS:"
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=${{ env.SERVICE_NAME }} -o wide
+          
+          echo ""
+          echo "2. EVENTOS RECIENTES (Por qué falló scheduling/arranque):"
+          kubectl describe pod -n ${{ env.NAMESPACE }} -l app=${{ env.SERVICE_NAME }} | grep -A 20 "Events:"
+          
+          echo ""
+          echo "3. LOGS DE APLICACIÓN (Últimas 50 líneas):"
+          kubectl logs -n ${{ env.NAMESPACE }} -l app=${{ env.SERVICE_NAME }} --tail=50 --all-containers || echo "No se pudieron obtener logs (pod quizás nunca arrancó)"
