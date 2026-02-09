@@ -1,8 +1,7 @@
 # ============================================================================
-# WORKFLOW AUTOMATICO DE DEPLOY A EKS - MS-COMPENSACION
-# Este workflow CREA el deployment si no existe, o lo ACTUALIZA si ya existe
+# WORKFLOW AUTOMATICO DE DEPLOY A EKS (Compensacion)
 # ============================================================================
-name: "Deploy to EKS (Auto)"
+name: "Deploy to EKS (Compensacion)"
 
 on:
   push:
@@ -12,13 +11,14 @@ env:
   AWS_REGION: us-east-2
   EKS_CLUSTER: eks-banca-ecosistema
   
-  # CONFIGURACIÓN: MS-COMPENSACIÓN
   NAMESPACE: switch
   ECR_REPO: switch-ms-compensacion
   SERVICE_NAME: switch-ms-compensacion
+  
+  # Configuración del contenedor (Puerto 8084)
   CONTAINER_PORT: "8084"
   
-  # Configuración de Secretos (PostgreSQL)
+  # Configuración de Secretos
   SECRET_NAME: "switch-db-credentials"
   SECRET_KEY_URL: "compensacion-url"
   SECRET_KEY_USER: "compensacion-username"
@@ -65,6 +65,7 @@ jobs:
       
       - name: Verificar o Crear Deployment
         run: |
+          # Verificar si el deployment existe
           if kubectl get deployment ${{ env.SERVICE_NAME }} -n ${{ env.NAMESPACE }} > /dev/null 2>&1; then
             echo "✅ Deployment existe, actualizando imagen..."
             kubectl set image deployment/${{ env.SERVICE_NAME }} \
@@ -108,11 +109,9 @@ jobs:
                         memory: "1Gi"
                         cpu: "500m"
                     env:
-                      - name: SERVER_PORT
-                        value: "${{ env.CONTAINER_PORT }}"
                       - name: SPRING_PROFILES_ACTIVE
                         value: "prod"
-                      # Inyeccion dinamica de secretos DB
+                      # Inyeccion dinamica de secretos
                       - name: SPRING_DATASOURCE_URL
                         valueFrom:
                           secretKeyRef:
@@ -128,26 +127,6 @@ jobs:
                           secretKeyRef:
                             name: ${{ env.SECRET_NAME }}
                             key: ${{ env.SECRET_KEY_PASS }}
-                      # RabbitMQ & APIM
-                      - name: RABBITMQ_USERNAME
-                        valueFrom:
-                          secretKeyRef:
-                            name: switch-secrets
-                            key: rabbitmq-username
-                      - name: RABBITMQ_PASSWORD
-                        valueFrom:
-                          secretKeyRef:
-                            name: switch-secrets
-                            key: rabbitmq-password
-                      - name: APIM_SECURITY_ENABLED
-                        value: "true"
-                      - name: APIM_ORIGIN_SECRET
-                        valueFrom:
-                          secretKeyRef:
-                            name: switch-secrets
-                            key: apim-origin-secret
-                      - name: TZ
-                        value: "America/Guayaquil"
                     livenessProbe:
                       httpGet:
                         path: /actuator/health/liveness
