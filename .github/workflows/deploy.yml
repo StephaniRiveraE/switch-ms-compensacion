@@ -123,6 +123,8 @@ jobs:
                           secretKeyRef:
                             name: ${{ env.SECRET_NAME }}
                             key: ${{ env.SECRET_KEY_PASS }}
+                      - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+                        value: "update"
                     livenessProbe:
                       httpGet:
                         path: /actuator/health/liveness
