@@ -1,6 +1,5 @@
 package com.bancario.compensacion.controlador;
 
-import com.bancario.compensacion.dto.ArchivoDTO;
 import com.bancario.compensacion.dto.CicloDTO;
 import com.bancario.compensacion.dto.PosicionDTO;
 import com.bancario.compensacion.servicio.CompensacionServicio;
