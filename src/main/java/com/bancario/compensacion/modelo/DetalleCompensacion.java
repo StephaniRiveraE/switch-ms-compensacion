@@ -12,6 +12,7 @@ public class DetalleCompensacion {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "idDetalle")
     private Long idDetalle;
 
     @Column(name = "idInstruccion")
