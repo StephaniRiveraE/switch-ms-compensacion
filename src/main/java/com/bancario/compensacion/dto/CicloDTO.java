@@ -9,7 +9,6 @@ import java.time.LocalDateTime;
 public class CicloDTO {
     private Integer id;
     private Integer numeroCiclo;
-    private String descripcion;
     private String estado;
     private LocalDateTime fechaApertura;
     private LocalDateTime fechaCierre;

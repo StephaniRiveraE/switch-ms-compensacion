@@ -8,9 +8,9 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface PosicionInstitucionRepositorio extends JpaRepository<PosicionInstitucion, Integer> {
+public interface PosicionInstitucionRepositorio extends JpaRepository<PosicionInstitucion, Long> {
 
-    Optional<PosicionInstitucion> findByCicloIdAndCodigoBic(Integer idCiclo, String codigoBic);
+    Optional<PosicionInstitucion> findByCicloIdCicloAndBic(Integer idCiclo, String bic);
 
-    List<PosicionInstitucion> findByCicloId(Integer idCiclo);
+    List<PosicionInstitucion> findByCicloIdCiclo(Integer idCiclo);
 }

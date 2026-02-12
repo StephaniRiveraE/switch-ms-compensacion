@@ -6,38 +6,33 @@ import lombok.Setter;
 import java.math.BigDecimal;
 
 @Entity
-@Table(name = "posicioninstitucion")
+@Table(name = "posicionInstitucion")
 @Getter
 @Setter
 public class PosicionInstitucion {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Integer id;
-
-    @Column(name = "id_ciclo", insertable = false, updatable = false)
-    private Integer idCiclo;
+    @Column(name = "idPosicion")
+    private Long idPosicion;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "id_ciclo")
+    @JoinColumn(name = "idCiclo")
     private CicloCompensacion ciclo;
 
-    @Column(name = "codigo_bic", length = 20)
-    private String codigoBic;
+    @Column(name = "bic", length = 20)
+    private String bic;
 
-    @Column(name = "saldo_inicial", precision = 20, scale = 2)
-    private BigDecimal saldoInicial = BigDecimal.ZERO;
-
-    @Column(name = "total_debitos", precision = 20, scale = 2)
+    @Column(name = "totalDebitos", precision = 18, scale = 2)
     private BigDecimal totalDebitos = BigDecimal.ZERO;
 
-    @Column(name = "total_creditos", precision = 20, scale = 2)
-    private BigDecimal totalCreditos = BigDecimal.ZERO;
+    @Column(name = "totalCredits", precision = 18, scale = 2)
+    private BigDecimal totalCredits = BigDecimal.ZERO;
 
-    @Column(name = "neto", precision = 20, scale = 2)
-    private BigDecimal neto = BigDecimal.ZERO;
+    @Column(name = "posicionNeta", precision = 18, scale = 2)
+    private BigDecimal posicionNeta = BigDecimal.ZERO;
 
     public void recalcularNeto() {
-        this.neto = this.saldoInicial.add(this.totalCreditos).subtract(this.totalDebitos);
+        this.posicionNeta = this.totalCredits.subtract(this.totalDebitos);
     }
 }

@@ -6,28 +6,25 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "archivoliquidacion")
+@Table(name = "archivoLiquidacion")
 @Getter
 @Setter
 public class ArchivoLiquidacion {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Integer id;
+    @Column(name = "idArchivo")
+    private Long idArchivo;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "id_ciclo")
+    @JoinColumn(name = "idCiclo")
     private CicloCompensacion ciclo;
 
-    private String nombre;
+    @Column(name = "nombreArchivo")
+    private String nombreArchivo;
 
-    @Column(name = "xml_contenido", columnDefinition = "TEXT")
-    private String xmlContenido;
+    @Column(name = "contenidoXml", columnDefinition = "TEXT")
+    private String contenidoXml;
 
-    @Column(name = "canal_envio")
-    private String canalEnvio;
-
-    private String estado;
-
-    @Column(name = "fecha_generacion")
+    @Column(name = "fechaGeneracion")
     private LocalDateTime fechaGeneracion;
 }

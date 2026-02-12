@@ -28,8 +28,6 @@ public class CompensacionServicio {
     private final CicloCompensacionRepositorio cicloRepo;
     private final PosicionInstitucionRepositorio posicionRepo;
     private final ArchivoLiquidacionRepositorio archivoRepo;
-    // private final SeguridadServicio seguridadServicio; // REMOVED: JWS signing is
-    // no longer handled here
     private final DetalleCompensacionRepositorio detalleRepo;
     private final CompensacionMapper mapper;
     private final RestTemplate restTemplate;
@@ -58,16 +56,12 @@ public class CompensacionServicio {
         detalle.setEstadoLiquidacion("INCLUIDO");
         detalleRepo.save(detalle);
 
-        // NOTE: Real-time accumulation is kept for immediate visibility,
-        // but final settlement will be recalculated from details at closing.
         if ("REVERSO".equalsIgnoreCase(req.getTipoOperacion())) {
-            // REVERSO logic: Credit Emisor (Refund), Debit Receptor (Take back)
-            acumularTransaccion(cicloAbierto.getId(), req.getBicEmisor(), req.getMonto(), false); // Credit
-            acumularTransaccion(cicloAbierto.getId(), req.getBicReceptor(), req.getMonto(), true); // Debit
+            acumularTransaccion(cicloAbierto.getIdCiclo(), req.getBicEmisor(), req.getMonto(), false);
+            acumularTransaccion(cicloAbierto.getIdCiclo(), req.getBicReceptor(), req.getMonto(), true);
         } else {
-            // PAGO logic: Debit Emisor, Credit Receptor
-            acumularTransaccion(cicloAbierto.getId(), req.getBicEmisor(), req.getMonto(), true);
-            acumularTransaccion(cicloAbierto.getId(), req.getBicReceptor(), req.getMonto(), false);
+            acumularTransaccion(cicloAbierto.getIdCiclo(), req.getBicEmisor(), req.getMonto(), true);
+            acumularTransaccion(cicloAbierto.getIdCiclo(), req.getBicReceptor(), req.getMonto(), false);
         }
     }
 
@@ -77,18 +71,18 @@ public class CompensacionServicio {
                 .stream().findFirst()
                 .orElseThrow(() -> new RuntimeException("No hay ciclo abierto para compensar (Auto)"));
 
-        acumularTransaccion(cicloAbierto.getId(), bic, monto, esDebito);
+        acumularTransaccion(cicloAbierto.getIdCiclo(), bic, monto, esDebito);
     }
 
     @Transactional
     public void acumularTransaccion(Integer cicloId, String bic, BigDecimal monto, boolean esDebito) {
-        PosicionInstitucion posicion = posicionRepo.findByCicloIdAndCodigoBic(cicloId, bic)
+        PosicionInstitucion posicion = posicionRepo.findByCicloIdCicloAndBic(cicloId, bic)
                 .orElseGet(() -> crearPosicionVacia(cicloId, bic));
 
         if (esDebito) {
             posicion.setTotalDebitos(posicion.getTotalDebitos().add(monto));
         } else {
-            posicion.setTotalCreditos(posicion.getTotalCreditos().add(monto));
+            posicion.setTotalCredits(posicion.getTotalCredits().add(monto));
         }
 
         posicion.recalcularNeto();
@@ -98,11 +92,10 @@ public class CompensacionServicio {
     private PosicionInstitucion crearPosicionVacia(Integer cicloId, String bic) {
         PosicionInstitucion p = new PosicionInstitucion();
         p.setCiclo(cicloRepo.getReferenceById(cicloId));
-        p.setCodigoBic(bic);
-        p.setSaldoInicial(BigDecimal.ZERO);
+        p.setBic(bic);
         p.setTotalDebitos(BigDecimal.ZERO);
-        p.setTotalCreditos(BigDecimal.ZERO);
-        p.setNeto(BigDecimal.ZERO);
+        p.setTotalCredits(BigDecimal.ZERO);
+        p.setPosicionNeta(BigDecimal.ZERO);
         return posicionRepo.save(p);
     }
 
@@ -112,7 +105,6 @@ public class CompensacionServicio {
 
         if (scheduledTask != null && !scheduledTask.isDone()) {
             scheduledTask.cancel(false);
-            log.info("Tarea automática anterior cancelada.");
         }
 
         CicloCompensacion cicloActual = cicloRepo.findById(cicloId)
@@ -122,15 +114,12 @@ public class CompensacionServicio {
             throw new RuntimeException("El ciclo ya está cerrado");
         }
 
-        // --- ALGORITMO DE NETEO / CLEARING ---
-        // Recalculate positions based on details to ensure accuracy
         recalcularPosicionesDesdeDetalles(cicloActual);
-        // -------------------------------------
 
-        List<PosicionInstitucion> posiciones = posicionRepo.findByCicloId(cicloId);
+        List<PosicionInstitucion> posiciones = posicionRepo.findByCicloIdCiclo(cicloId);
 
         BigDecimal sumaNetos = posiciones.stream()
-                .map(PosicionInstitucion::getNeto)
+                .map(PosicionInstitucion::getPosicionNeta)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         if (sumaNetos.abs().compareTo(new BigDecimal("0.01")) > 0) {
@@ -138,15 +127,11 @@ public class CompensacionServicio {
         }
 
         String xml = generarXML(cicloActual, posiciones);
-        // String firma = seguridadServicio.firmarDocumento(xml); // REMOVED
 
         ArchivoLiquidacion archivo = new ArchivoLiquidacion();
         archivo.setCiclo(cicloActual);
-        archivo.setNombre("LIQ_CICLO_" + cicloActual.getNumeroCiclo() + ".xml");
-        archivo.setXmlContenido(xml);
-
-        archivo.setCanalEnvio("BCE_DIRECT_LINK");
-        archivo.setEstado("ENVIADO");
+        archivo.setNombreArchivo("LIQ_CICLO_" + cicloActual.getNumeroCiclo() + ".xml");
+        archivo.setContenidoXml(xml);
         archivo.setFechaGeneracion(LocalDateTime.now(java.time.ZoneOffset.UTC));
         archivo = archivoRepo.save(archivo);
 
@@ -154,71 +139,55 @@ public class CompensacionServicio {
         cicloActual.setFechaCierre(LocalDateTime.now(java.time.ZoneOffset.UTC));
         cicloRepo.save(cicloActual);
 
-        // --- DISPARO CONTABLE: Enviar posiciones a MS-CONTABILIDAD ---
         enviarLiquidacionAContabilidad(cicloId, posiciones);
-        // -------------------------------------------------------------
-
         iniciarSiguienteCiclo(cicloActual, posiciones, minutosProximoCiclo);
 
         return mapper.toDTO(archivo);
     }
 
-    /**
-     * Re-processes all details for the cycle to ensure the final positions are
-     * correct.
-     * Use this for the "Clearing" step.
-     */
     private void recalcularPosicionesDesdeDetalles(CicloCompensacion ciclo) {
-        log.info("Ejecutando algoritmo de neteo para ciclo {}", ciclo.getId());
+        log.info("Ejecutando algoritmo de neteo para ciclo {}", ciclo.getIdCiclo());
 
-        // 1. Reset all positions for the cycle
-        List<PosicionInstitucion> posiciones = posicionRepo.findByCicloId(ciclo.getId());
+        List<PosicionInstitucion> posiciones = posicionRepo.findByCicloIdCiclo(ciclo.getIdCiclo());
         for (PosicionInstitucion p : posiciones) {
             p.setTotalDebitos(BigDecimal.ZERO);
-            p.setTotalCreditos(BigDecimal.ZERO);
-            p.setNeto(BigDecimal.ZERO); // derived, but good to reset
+            p.setTotalCredits(BigDecimal.ZERO);
+            p.setPosicionNeta(BigDecimal.ZERO);
         }
         Map<String, PosicionInstitucion> mapaPosiciones = posiciones.stream()
-                .collect(Collectors.toMap(PosicionInstitucion::getCodigoBic, p -> p));
+                .collect(Collectors.toMap(PosicionInstitucion::getBic, p -> p));
 
-        // 2. Fetch all details
-        List<DetalleCompensacion> detalles = detalleRepo.findByCicloId(ciclo.getId()); // Assuming this method exists or
-                                                                                       // similar
+        List<DetalleCompensacion> detalles = detalleRepo.findByCicloIdCiclo(ciclo.getIdCiclo());
 
-        // 3. Process each detail
         for (DetalleCompensacion d : detalles) {
-            if ("EXCLUIDO".equalsIgnoreCase(d.getEstadoLiquidacion()))
+            if ("EXCLUIDO".equalsIgnoreCase(d.getEstadoLiquidacion())
+                    || "PENDIENTE".equalsIgnoreCase(d.getEstadoLiquidacion()))
                 continue;
 
             PosicionInstitucion posEmisor = mapaPosiciones.computeIfAbsent(d.getBicEmisor(),
-                    k -> crearPosicionVacia(ciclo.getId(), k));
+                    k -> crearPosicionVacia(ciclo.getIdCiclo(), k));
             PosicionInstitucion posReceptor = mapaPosiciones.computeIfAbsent(d.getBicReceptor(),
-                    k -> crearPosicionVacia(ciclo.getId(), k));
+                    k -> crearPosicionVacia(ciclo.getIdCiclo(), k));
 
             if ("REVERSO".equalsIgnoreCase(d.getTipoOperacion())) {
-                // REVERSO: Emisor receives back (Credit), Receptor pays back (Debit)
-                posEmisor.setTotalCreditos(posEmisor.getTotalCreditos().add(d.getMonto()));
+                posEmisor.setTotalCredits(posEmisor.getTotalCredits().add(d.getMonto()));
                 posReceptor.setTotalDebitos(posReceptor.getTotalDebitos().add(d.getMonto()));
             } else {
-                // PAGO: Emisor pays (Debit), Receptor receives (Credit)
                 posEmisor.setTotalDebitos(posEmisor.getTotalDebitos().add(d.getMonto()));
-                posReceptor.setTotalCreditos(posReceptor.getTotalCreditos().add(d.getMonto()));
+                posReceptor.setTotalCredits(posReceptor.getTotalCredits().add(d.getMonto()));
             }
         }
 
-        // 4. Save and Recalculate Net
         for (PosicionInstitucion p : mapaPosiciones.values()) {
             p.recalcularNeto();
             posicionRepo.save(p);
         }
-        log.info("Neteo completado. Procesados {} detalles.", detalles.size());
     }
 
     private void iniciarSiguienteCiclo(CicloCompensacion anterior, List<PosicionInstitucion> saldosAnteriores,
             Integer minutosDuracion) {
         CicloCompensacion nuevo = new CicloCompensacion();
         nuevo.setNumeroCiclo(anterior.getNumeroCiclo() + 1);
-        nuevo.setDescripcion("Ciclo Automático (" + minutosDuracion + " min)");
         nuevo.setEstado("ABIERTO");
         nuevo.setFechaApertura(LocalDateTime.now(java.time.ZoneOffset.UTC));
         CicloCompensacion guardado = cicloRepo.save(nuevo);
@@ -226,71 +195,50 @@ public class CompensacionServicio {
         for (PosicionInstitucion posAnt : saldosAnteriores) {
             PosicionInstitucion posNueva = new PosicionInstitucion();
             posNueva.setCiclo(guardado);
-            posNueva.setCodigoBic(posAnt.getCodigoBic());
-            posNueva.setSaldoInicial(BigDecimal.ZERO);
+            posNueva.setBic(posAnt.getBic());
             posNueva.setTotalDebitos(BigDecimal.ZERO);
-            posNueva.setTotalCreditos(BigDecimal.ZERO);
+            posNueva.setTotalCredits(BigDecimal.ZERO);
             posNueva.recalcularNeto();
             posicionRepo.save(posNueva);
         }
 
-        programarCierreAutomatico(guardado.getId(), minutosDuracion != null ? minutosDuracion : 10);
-
-        log.info(">>> CICLO {} INICIADO. Cierre programado en {} minutos.", nuevo.getNumeroCiclo(), minutosDuracion);
+        programarCierreAutomatico(guardado.getIdCiclo(), minutosDuracion != null ? minutosDuracion : 10);
     }
 
     public void programarCierreAutomatico(Integer cicloId, int minutos) {
-        // Encontrar el ciclo para saber cuándo se abrió
         CicloCompensacion ciclo = cicloRepo.findById(cicloId)
-                .orElseThrow(() -> new RuntimeException("Ciclo " + cicloId + " no existe para programar cierre."));
+                .orElseThrow(() -> new RuntimeException("Ciclo " + cicloId + " no existe."));
 
-        if (!"ABIERTO".equals(ciclo.getEstado())) {
-            log.info("Ciclo {} ya no está ABIERTO. Cancelando programación de cierre.", cicloId);
+        if (!"ABIERTO".equals(ciclo.getEstado()))
             return;
-        }
 
         Runnable tareaCierre = () -> {
             try {
-                log.info(">>> EJECUTANDO CIERRE AUTOMÁTICO CICLO {}", cicloId);
-
-                // IMPORTANTE: Al cerrar el ciclo actual automáticamente,
-                // definimos que el SIGUIENTE ciclo durará también 90 minutos.
                 realizarCierreDiario(cicloId, 60);
             } catch (Exception e) {
                 log.error("Error en cierre automático: {}", e.getMessage());
             }
         };
 
-        java.time.Instant fechaAperturaInstant = ciclo.getFechaApertura().toInstant(java.time.ZoneOffset.UTC);
-        java.time.Instant fechaEjecucion = fechaAperturaInstant.plus(java.time.Duration.ofMinutes(minutos));
+        java.time.Instant fechaEjecucion = ciclo.getFechaApertura().toInstant(java.time.ZoneOffset.UTC)
+                .plus(java.time.Duration.ofMinutes(minutos));
 
-        // Si la fecha ya pasó (ej: reinicio del server), ejecutar en 1 minuto para
-        // forzar cierre
         if (fechaEjecucion.isBefore(java.time.Instant.now())) {
-            log.warn("El tiempo de cierre del ciclo {} ya expiró. Programando cierre inminente.", cicloId);
             fechaEjecucion = java.time.Instant.now().plusSeconds(10);
         }
 
-        log.info("Programando cierre automático del ciclo {} para: {}", cicloId, fechaEjecucion);
         this.scheduledTask = taskScheduler.schedule(tareaCierre, fechaEjecucion);
     }
 
-    /**
-     * DISPARO CONTABLE: Envía las posiciones calculadas a MS-CONTABILIDAD
-     * para que libere los fondosBloqueados y aplique los saldos netos reales.
-     */
     private void enviarLiquidacionAContabilidad(Integer cicloId, List<PosicionInstitucion> posiciones) {
-        log.info(">>> ENVIANDO LIQUIDACIÓN A CONTABILIDAD para ciclo {}", cicloId);
-
         try {
-            // Construir DTO compatible con MS-CONTABILIDAD
             java.util.List<java.util.Map<String, Object>> posicionesDTO = new java.util.ArrayList<>();
             for (PosicionInstitucion p : posiciones) {
                 java.util.Map<String, Object> pos = new java.util.HashMap<>();
-                pos.put("bic", p.getCodigoBic());
+                pos.put("bic", p.getBic());
                 pos.put("totalDebitos", p.getTotalDebitos());
-                pos.put("totalCreditos", p.getTotalCreditos());
-                pos.put("posicionNeta", p.getNeto());
+                pos.put("totalCreditos", p.getTotalCredits());
+                pos.put("posicionNeta", p.getPosicionNeta());
                 posicionesDTO.add(pos);
             }
 
@@ -298,14 +246,9 @@ public class CompensacionServicio {
             solicitud.put("cicloId", cicloId);
             solicitud.put("posiciones", posicionesDTO);
 
-            String url = contabilidadUrl + "/api/v1/ledger/compensar";
-            restTemplate.postForEntity(url, solicitud, Void.class);
-
-            log.info(">>> LIQUIDACIÓN ENVIADA EXITOSAMENTE. Saldos actualizados en Contabilidad.");
-
+            restTemplate.postForEntity(contabilidadUrl + "/api/v1/ledger/compensar", solicitud, Void.class);
         } catch (Exception e) {
-            log.error("ALERTA CRÍTICA: Fallo al enviar liquidación a Contabilidad: {}", e.getMessage());
-            // En producción, esto debería disparar una alerta y mecanismo de reintento
+            log.error("Fallo al enviar liquidación a Contabilidad: {}", e.getMessage());
             throw new RuntimeException("Error en Disparo Contable: " + e.getMessage());
         }
     }
@@ -314,25 +257,12 @@ public class CompensacionServicio {
         try (java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
             com.lowagie.text.Document document = new com.lowagie.text.Document();
             com.lowagie.text.pdf.PdfWriter.getInstance(document, out);
-
             document.open();
-
-            com.lowagie.text.Font titleFont = com.lowagie.text.FontFactory
-                    .getFont(com.lowagie.text.FontFactory.HELVETICA_BOLD, 18);
-            com.lowagie.text.Paragraph title = new com.lowagie.text.Paragraph("Reporte de Compensación (Switch V3)",
-                    titleFont);
-            title.setAlignment(com.lowagie.text.Element.ALIGN_CENTER);
-            document.add(title);
-            document.add(new com.lowagie.text.Paragraph(" "));
 
             CicloCompensacion ciclo = cicloRepo.findById(cicloId).orElseThrow();
             document.add(new com.lowagie.text.Paragraph("Ciclo: " + ciclo.getNumeroCiclo()));
             document.add(new com.lowagie.text.Paragraph("Estado: " + ciclo.getEstado()));
             document.add(new com.lowagie.text.Paragraph("Fecha Apertura: " + ciclo.getFechaApertura()));
-            if (ciclo.getFechaCierre() != null)
-                document.add(new com.lowagie.text.Paragraph("Fecha Cierre: " + ciclo.getFechaCierre()));
-
-            document.add(new com.lowagie.text.Paragraph(" "));
 
             com.lowagie.text.pdf.PdfPTable table = new com.lowagie.text.pdf.PdfPTable(4);
             table.setWidthPercentage(100);
@@ -341,23 +271,14 @@ public class CompensacionServicio {
             table.addCell("Créditos");
             table.addCell("Posición Neta");
 
-            List<PosicionInstitucion> posiciones = posicionRepo.findByCicloId(cicloId);
+            List<PosicionInstitucion> posiciones = posicionRepo.findByCicloIdCiclo(cicloId);
             for (PosicionInstitucion p : posiciones) {
-                table.addCell(p.getCodigoBic());
+                table.addCell(p.getBic());
                 table.addCell(p.getTotalDebitos().toString());
-                table.addCell(p.getTotalCreditos().toString());
-
-                com.lowagie.text.pdf.PdfPCell cellNeto = new com.lowagie.text.pdf.PdfPCell(
-                        new com.lowagie.text.Phrase(p.getNeto().toString()));
-                if (p.getNeto().signum() < 0)
-                    cellNeto.setBackgroundColor(java.awt.Color.PINK);
-                else
-                    cellNeto.setBackgroundColor(java.awt.Color.CYAN);
-
-                table.addCell(cellNeto);
+                table.addCell(p.getTotalCredits().toString());
+                table.addCell(p.getPosicionNeta().toString());
             }
             document.add(table);
-
             document.close();
             return out.toByteArray();
         } catch (Exception e) {
@@ -367,26 +288,15 @@ public class CompensacionServicio {
 
     private String generarXML(CicloCompensacion ciclo, List<PosicionInstitucion> posiciones) {
         StringBuilder sb = new StringBuilder();
-
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        sb.append("<SettlementFile xmlns=\"http://bancario.switch/settlement/v1\">\n");
-        sb.append("  <Header>\n");
-        sb.append("    <MsgId>MSG-LIQ-").append(System.currentTimeMillis()).append("</MsgId>\n");
-        sb.append("    <CycleId>").append(ciclo.getNumeroCiclo()).append("</CycleId>\n");
-        sb.append("    <CreationDate>").append(LocalDateTime.now(java.time.ZoneOffset.UTC)).append("</CreationDate>\n");
-        sb.append("    <TotalRecords>").append(posiciones.size()).append("</TotalRecords>\n");
-        sb.append("  </Header>\n");
-        sb.append("  <Transactions>\n");
+        sb.append("<SettlementFile>\n");
         for (PosicionInstitucion p : posiciones) {
-            sb.append("    <Tx>\n");
-            sb.append("      <BankBIC>").append(p.getCodigoBic()).append("</BankBIC>\n");
-            sb.append("      <NetPosition currency=\"USD\">").append(p.getNeto()).append("</NetPosition>\n");
-            sb.append("      <Action>").append(p.getNeto().signum() >= 0 ? "RECEIVE" : "PAY").append("</Action>\n");
-            sb.append("    </Tx>\n");
+            sb.append("  <Tx>\n");
+            sb.append("    <BankBIC>").append(p.getBic()).append("</BankBIC>\n");
+            sb.append("    <NetPosition>").append(p.getPosicionNeta()).append("</NetPosition>\n");
+            sb.append("  </Tx>\n");
         }
-        sb.append("  </Transactions>\n");
         sb.append("</SettlementFile>");
-
         return sb.toString();
     }
 
@@ -395,20 +305,16 @@ public class CompensacionServicio {
         if (ciclos.isEmpty()) {
             CicloCompensacion primerCiclo = new CicloCompensacion();
             primerCiclo.setNumeroCiclo(1);
-            primerCiclo.setDescripcion("Ciclo Inicial");
             primerCiclo.setEstado("ABIERTO");
             primerCiclo.setFechaApertura(LocalDateTime.now(java.time.ZoneOffset.UTC));
             CicloCompensacion guardado = cicloRepo.save(primerCiclo);
-
-            programarCierreAutomatico(guardado.getId(), 60);
-
+            programarCierreAutomatico(guardado.getIdCiclo(), 60);
             ciclos.add(guardado);
         }
         return ciclos.stream().map(mapper::toDTO).toList();
     }
 
     public List<PosicionDTO> obtenerPosicionesCiclo(Integer cicloId) {
-        List<PosicionInstitucion> posiciones = posicionRepo.findByCicloId(cicloId);
-        return mapper.toPosicionList(posiciones);
+        return mapper.toPosicionList(posicionRepo.findByCicloIdCiclo(cicloId));
     }
 }

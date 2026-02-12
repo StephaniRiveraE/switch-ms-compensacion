@@ -6,26 +6,24 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "ciclocompensacion")
+@Table(name = "cicloCompensacion")
 @Getter
 @Setter
 public class CicloCompensacion {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Integer id;
+    @Column(name = "idCiclo")
+    private Integer idCiclo;
 
-    @Column(name = "numero_ciclo")
+    @Column(name = "numeroCiclo")
     private Integer numeroCiclo;
 
-    @Column(length = 100)
-    private String descripcion;
-
     @Column(length = 20)
-    private String estado;
+    private String estado; // OPEN, CLOSED, SETTLED
 
-    @Column(name = "fecha_apertura")
+    @Column(name = "fechaApertura")
     private LocalDateTime fechaApertura;
 
-    @Column(name = "fecha_cierre")
+    @Column(name = "fechaCierre")
     private LocalDateTime fechaCierre;
 }

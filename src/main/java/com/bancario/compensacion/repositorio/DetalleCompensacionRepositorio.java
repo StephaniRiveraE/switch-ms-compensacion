@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 public interface DetalleCompensacionRepositorio extends JpaRepository<DetalleCompensacion, Long> {
-    List<DetalleCompensacion> findByCicloId(Integer cicloId);
+    List<DetalleCompensacion> findByCicloIdCiclo(Integer idCiclo);
 
     List<DetalleCompensacion> findByIdInstruccion(UUID idInstruccion);
 }

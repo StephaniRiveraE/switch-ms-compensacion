@@ -7,11 +7,8 @@ import java.time.LocalDateTime;
 @Data
 @Builder
 public class ArchivoDTO {
-    private Integer id;
+    private Long id;
     private String nombre;
-    private String xmlContenido;
-
-    private String canalEnvio;
-    private String estado;
+    private String contenidoXml;
     private LocalDateTime fechaGeneracion;
 }

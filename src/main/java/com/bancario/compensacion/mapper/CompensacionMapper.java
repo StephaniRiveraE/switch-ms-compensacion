@@ -17,9 +17,8 @@ public class CompensacionMapper {
         if (entity == null)
             return null;
         return CicloDTO.builder()
-                .id(entity.getId())
+                .id(entity.getIdCiclo())
                 .numeroCiclo(entity.getNumeroCiclo())
-                .descripcion(entity.getDescripcion())
                 .estado(entity.getEstado())
                 .fechaApertura(entity.getFechaApertura())
                 .fechaCierre(entity.getFechaCierre())
@@ -30,13 +29,12 @@ public class CompensacionMapper {
         if (entity == null)
             return null;
         return PosicionDTO.builder()
-                .id(entity.getId())
-                .idCiclo(entity.getCiclo() != null ? entity.getCiclo().getId() : null)
-                .codigoBic(entity.getCodigoBic())
-                .saldoInicial(entity.getSaldoInicial())
+                .id(entity.getIdPosicion())
+                .idCiclo(entity.getCiclo() != null ? entity.getCiclo().getIdCiclo() : null)
+                .codigoBic(entity.getBic())
                 .totalDebitos(entity.getTotalDebitos())
-                .totalCreditos(entity.getTotalCreditos())
-                .neto(entity.getNeto())
+                .totalCreditos(entity.getTotalCredits())
+                .posicionNeta(entity.getPosicionNeta())
                 .build();
     }
 
@@ -44,12 +42,9 @@ public class CompensacionMapper {
         if (entity == null)
             return null;
         return ArchivoDTO.builder()
-                .id(entity.getId())
-                .nombre(entity.getNombre())
-                .xmlContenido(entity.getXmlContenido())
-
-                .canalEnvio(entity.getCanalEnvio())
-                .estado(entity.getEstado())
+                .id(entity.getIdArchivo())
+                .nombre(entity.getNombreArchivo())
+                .contenidoXml(entity.getContenidoXml())
                 .fechaGeneracion(entity.getFechaGeneracion())
                 .build();
     }
