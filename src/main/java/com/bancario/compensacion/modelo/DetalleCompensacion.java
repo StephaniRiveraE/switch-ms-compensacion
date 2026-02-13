@@ -12,7 +12,10 @@ public class DetalleCompensacion {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+<<<<<<< HEAD
     @Column(name = "idDetalle")
+=======
+>>>>>>> e802ba3afe0f10f8ab8394d63f83f08d1ca3003a
     private Long idDetalle;
 
     @Column(name = "idInstruccion")
