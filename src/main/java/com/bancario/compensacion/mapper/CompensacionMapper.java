@@ -42,18 +42,9 @@ public class CompensacionMapper {
         if (entity == null)
             return null;
         return ArchivoDTO.builder()
-<<<<<<< HEAD
                 .id(entity.getIdArchivo())
                 .nombre(entity.getNombreArchivo())
                 .contenidoXml(entity.getContenidoXml())
-=======
-                .id(entity.getId())
-                .nombre(entity.getNombre())
-                .xmlContenido(entity.getXmlContenido())
-
-                .canalEnvio(entity.getCanalEnvio())
-                .estado(entity.getEstado())
->>>>>>> e802ba3afe0f10f8ab8394d63f83f08d1ca3003a
                 .fechaGeneracion(entity.getFechaGeneracion())
                 .build();
     }
